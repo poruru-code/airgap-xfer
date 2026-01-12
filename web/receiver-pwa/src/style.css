@@ -101,6 +101,24 @@ h1 {
   color: var(--text);
 }
 
+.select-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 150px;
+}
+
+.select-field select {
+  background: #0b0f14;
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: var(--text);
+  font-size: 14px;
+}
+
 .button {
   background: #0b0f14;
   border: 1px solid var(--panel-edge);

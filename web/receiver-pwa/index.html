@@ -48,6 +48,23 @@
         <div class="camera-controls">
           <button id="camera-start" class="button">Start camera</button>
           <button id="camera-stop" class="button" disabled>Stop</button>
+          <label class="select-field">
+            <span>Capture width</span>
+            <select id="camera-max-width">
+              <option value="640">640 px</option>
+              <option value="960" selected>960 px</option>
+              <option value="1280">1280 px</option>
+            </select>
+          </label>
+          <label class="select-field">
+            <span>Interval</span>
+            <select id="camera-interval">
+              <option value="100">100 ms</option>
+              <option value="140" selected>140 ms</option>
+              <option value="200">200 ms</option>
+              <option value="250">250 ms</option>
+            </select>
+          </label>
         </div>
         <div class="camera-grid">
           <video id="camera-preview" class="camera-preview" autoplay muted playsinline></video>

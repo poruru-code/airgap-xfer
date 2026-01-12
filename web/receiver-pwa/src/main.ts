@@ -16,6 +16,8 @@ const qrStatusEl = document.querySelector<HTMLDivElement>("#qr-status");
 const qrResultEl = document.querySelector<HTMLDivElement>("#qr-result");
 const cameraStartButton = document.querySelector<HTMLButtonElement>("#camera-start");
 const cameraStopButton = document.querySelector<HTMLButtonElement>("#camera-stop");
+const cameraMaxWidthSelect = document.querySelector<HTMLSelectElement>("#camera-max-width");
+const cameraIntervalSelect = document.querySelector<HTMLSelectElement>("#camera-interval");
 const cameraVideo = document.querySelector<HTMLVideoElement>("#camera-preview");
 const cameraStatusEl = document.querySelector<HTMLDivElement>("#camera-status");
 const cameraResultEl = document.querySelector<HTMLDivElement>("#camera-result");
@@ -33,6 +35,8 @@ if (
   !qrResultEl ||
   !cameraStartButton ||
   !cameraStopButton ||
+  !cameraMaxWidthSelect ||
+  !cameraIntervalSelect ||
   !cameraVideo ||
   !cameraStatusEl ||
   !cameraResultEl ||
@@ -84,8 +88,13 @@ let cameraCaptureWidth = 0;
 let cameraCaptureHeight = 0;
 let cameraCanvas: HTMLCanvasElement | null = null;
 let cameraContext: CanvasRenderingContext2D | null = null;
-const CAMERA_CAPTURE_MAX_WIDTH = 960;
-const CAMERA_CAPTURE_INTERVAL_MS = 140;
+const CAMERA_CAPTURE_MAX_WIDTH_DEFAULT = 960;
+const CAMERA_CAPTURE_INTERVAL_MS_DEFAULT = 140;
+const CAMERA_REPEAT_SUPPRESS_MS = 1200;
+let cameraCaptureMaxWidth = CAMERA_CAPTURE_MAX_WIDTH_DEFAULT;
+let cameraCaptureIntervalMs = CAMERA_CAPTURE_INTERVAL_MS_DEFAULT;
+let lastCameraText: string | null = null;
+let lastCameraTextAt = 0;
 const supportsBitmapPipeline = typeof createImageBitmap === "function" && "OffscreenCanvas" in window;
 
 const qrWorker = new Worker(new URL("./qr.worker.ts", import.meta.url), { type: "module" });
@@ -122,12 +131,20 @@ qrWorker.onmessage = (event) => {
         return;
       }
       cameraDecodeInFlight = false;
-      cameraResult = {
-        text: msg.text,
-        format: msg.format,
-        durationMs: msg.durationMs,
-      };
+      const now = performance.now();
       if (msg.text) {
+        if (msg.text === lastCameraText && now - lastCameraTextAt < CAMERA_REPEAT_SUPPRESS_MS) {
+          setCameraStatus("decoded (cached)", false);
+          renderAll();
+          return;
+        }
+        lastCameraText = msg.text;
+        lastCameraTextAt = now;
+        cameraResult = {
+          text: msg.text,
+          format: msg.format,
+          durationMs: msg.durationMs,
+        };
         setCameraStatus("decoded", false);
       } else {
         setCameraStatus("scanning...", false);
@@ -333,6 +350,33 @@ function updateCameraControls() {
   cameraStopButton.disabled = !running;
 }
 
+function setCameraInterval(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return;
+  }
+  cameraCaptureIntervalMs = value;
+  if (cameraStream) {
+    if (cameraTimer !== null) {
+      window.clearInterval(cameraTimer);
+    }
+    cameraTimer = window.setInterval(() => {
+      void captureCameraFrame();
+    }, cameraCaptureIntervalMs);
+  }
+}
+
+function setCameraMaxWidth(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return;
+  }
+  cameraCaptureMaxWidth = value;
+  if (cameraVideo.videoWidth > 0 && cameraVideo.videoHeight > 0) {
+    const capture = computeCaptureSize(cameraVideo.videoWidth, cameraVideo.videoHeight, cameraCaptureMaxWidth);
+    cameraCaptureWidth = capture.width;
+    cameraCaptureHeight = capture.height;
+  }
+}
+
 function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
   if (video.readyState >= 1 && video.videoWidth > 0 && video.videoHeight > 0) {
     return Promise.resolve();
@@ -387,7 +431,10 @@ async function startCamera() {
     cameraVideo.srcObject = stream;
     await cameraVideo.play();
     await waitForVideoMetadata(cameraVideo);
-    const capture = computeCaptureSize(cameraVideo.videoWidth, cameraVideo.videoHeight, CAMERA_CAPTURE_MAX_WIDTH);
+    lastCameraText = null;
+    lastCameraTextAt = 0;
+    cameraResult = null;
+    const capture = computeCaptureSize(cameraVideo.videoWidth, cameraVideo.videoHeight, cameraCaptureMaxWidth);
     cameraCaptureWidth = capture.width;
     cameraCaptureHeight = capture.height;
     if (cameraTimer !== null) {
@@ -395,7 +442,7 @@ async function startCamera() {
     }
     cameraTimer = window.setInterval(() => {
       void captureCameraFrame();
-    }, CAMERA_CAPTURE_INTERVAL_MS);
+    }, cameraCaptureIntervalMs);
     setCameraStatus("Camera running", false);
   } catch (err) {
     cameraStream = null;
@@ -419,6 +466,9 @@ function stopCamera() {
   }
   cameraVideo.srcObject = null;
   cameraDecodeInFlight = false;
+  lastCameraText = null;
+  lastCameraTextAt = 0;
+  cameraResult = null;
   setCameraStatus("Camera stopped", false);
   updateCameraControls();
 }
@@ -432,7 +482,7 @@ async function captureCameraFrame() {
   }
   cameraDecodeInFlight = true;
   if (cameraCaptureWidth === 0 || cameraCaptureHeight === 0) {
-    const capture = computeCaptureSize(cameraVideo.videoWidth, cameraVideo.videoHeight, CAMERA_CAPTURE_MAX_WIDTH);
+    const capture = computeCaptureSize(cameraVideo.videoWidth, cameraVideo.videoHeight, cameraCaptureMaxWidth);
     cameraCaptureWidth = capture.width;
     cameraCaptureHeight = capture.height;
   }
@@ -508,6 +558,7 @@ function renderAll() {
   if (qrWorkerError) {
     detailEntries.push(["ZXing error", qrWorkerError]);
   }
+  detailEntries.push(["Camera config", `${cameraCaptureMaxWidth}px / ${cameraCaptureIntervalMs}ms`]);
   if (cameraStream) {
     detailEntries.push(["Camera capture", `${cameraCaptureWidth}x${cameraCaptureHeight}`]);
   } else {
@@ -610,6 +661,21 @@ cameraStartButton.addEventListener("click", () => {
 
 cameraStopButton.addEventListener("click", () => {
   stopCamera();
+});
+
+cameraMaxWidthSelect.value = String(cameraCaptureMaxWidth);
+cameraIntervalSelect.value = String(cameraCaptureIntervalMs);
+
+cameraMaxWidthSelect.addEventListener("change", () => {
+  const value = Number(cameraMaxWidthSelect.value);
+  setCameraMaxWidth(value);
+  renderAll();
+});
+
+cameraIntervalSelect.addEventListener("change", () => {
+  const value = Number(cameraIntervalSelect.value);
+  setCameraInterval(value);
+  renderAll();
 });
 
 updateCameraControls();
