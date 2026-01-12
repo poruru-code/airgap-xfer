@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Airgap Xfer Receiver</title>
+  </head>
+  <body>
+    <div id="app" class="app">
+      <header class="header">
+        <div class="badge">AIRGAP • RECEIVER</div>
+        <h1>Packets Inspector</h1>
+        <p class="subtitle">
+          Load <span class="mono">packets.bin</span> and optional
+          <span class="mono">debug.json</span> to validate session integrity.
+        </p>
+      </header>
+
+      <section class="panel">
+        <h2>Inputs</h2>
+        <div class="inputs">
+          <label class="file-field">
+            <span>Packets file</span>
+            <input id="packets-file" type="file" accept=".bin" />
+          </label>
+          <label class="file-field">
+            <span>Debug file (optional)</span>
+            <input id="debug-file" type="file" accept=".json" />
+          </label>
+        </div>
+        <div id="status" class="status">Waiting for packets.bin</div>
+      </section>
+
+      <section class="grid">
+        <div class="panel">
+          <h2>Packets Summary</h2>
+          <div id="packets-summary" class="kv"></div>
+        </div>
+        <div class="panel">
+          <h2>Debug Summary</h2>
+          <div id="debug-summary" class="kv"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Checks</h2>
+        <div id="checks" class="kv"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Details</h2>
+        <div id="details" class="kv"></div>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

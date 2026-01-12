@@ -1,0 +1,11 @@
+[package]
+name = "xfer-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+xfer-core = { path = "../xfer-core" }
+xfer-fountain = { path = "../xfer-fountain" }
+getrandom = "0.3"
+sha2 = "0.10"
+serde_json = "1.0"

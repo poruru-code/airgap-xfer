@@ -1,0 +1,10 @@
+[workspace]
+members = [
+  "crates/xfer-core",
+  "crates/xfer-fountain",
+  "crates/xfer-codec",
+  "crates/xfer-render",
+  "crates/xfer-cli",
+  "web/wasm/decode",
+]
+resolver = "2"

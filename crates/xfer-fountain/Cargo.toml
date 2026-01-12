@@ -1,0 +1,7 @@
+[package]
+name = "xfer-fountain"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+raptorq = "2.0.0"
