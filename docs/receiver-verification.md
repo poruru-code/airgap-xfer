@@ -37,6 +37,36 @@ DEV_HOST=<PCのIP> scripts/dev_https_pwa.sh
 - `<PCのIP>` は同一LAN上のIP（例: `192.168.1.10`）
 - 既定ポートは `5173`（必要なら `PORT=4173` などで変更）
 
+### WSLでViteを起動している場合（Windows向けポートフォワード）
+
+WSL2は仮想NATなので、**WSLのIPではスマホから到達できません**。  
+Windows側でポートフォワードを張り、**WindowsのLAN IP** を使います。
+
+1. WSL側でリポジトリルートへ移動し、PowerShell 用パスを取得
+   ```
+   cd airgap-xfer
+   wslpath -w "$(pwd)/scripts/wsl_portproxy.ps1"
+   ```
+2. Windows PowerShell を **管理者として起動** し、以下を実行
+   ```
+   powershell -ExecutionPolicy Bypass -File "<上で出たパス>" -ListenPort 5173
+   ```
+3. WindowsのLAN IPを確認
+   ```
+   ipconfig | findstr /R /C:"IPv4 Address"
+   ```
+4. **DEV_HOSTにはWindowsのLAN IP** を指定してHTTPS起動
+   ```
+   DEV_HOST=<WindowsのLAN IP> scripts/dev_https_pwa.sh
+   ```
+
+補足:
+- WSLのIPは再起動で変わるため、再起動後は `wsl_portproxy.ps1` を再実行してください
+- ポートフォワードを解除したい場合:
+  ```
+  powershell -ExecutionPolicy Bypass -File "<上で出たパス>" -ListenPort 5173 -Remove
+  ```
+
 ### iOSにルートCAを信頼させる
 
 1. `mkcert -CAROOT` を確認
