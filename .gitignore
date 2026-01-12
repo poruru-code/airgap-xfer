@@ -7,3 +7,4 @@ target/
 **/playwright-report/
 *.log
 *.tmp
+web/receiver-pwa/certs/

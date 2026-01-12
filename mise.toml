@@ -1,3 +1,4 @@
 [tools]
 rust = "stable"
 bun = "1.1.26"
+mkcert = "1.4.4"
