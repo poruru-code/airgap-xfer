@@ -101,10 +101,55 @@ h1 {
   color: var(--text);
 }
 
+.button {
+  background: #0b0f14;
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 10px 16px;
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.button:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .status {
   margin-top: 12px;
   font-size: 14px;
   color: var(--accent-2);
+}
+
+.camera-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.camera-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.camera-preview {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  border: 1px solid var(--panel-edge);
+  background: #0b0f14;
+  object-fit: cover;
 }
 
 .grid {
@@ -150,5 +195,9 @@ h1 {
 
   h1 {
     font-size: 28px;
+  }
+
+  .camera-grid {
+    grid-template-columns: 1fr;
   }
 }

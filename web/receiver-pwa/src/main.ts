@@ -14,12 +14,33 @@ const qrInput = document.querySelector<HTMLInputElement>("#qr-file");
 const statusEl = document.querySelector<HTMLDivElement>("#status");
 const qrStatusEl = document.querySelector<HTMLDivElement>("#qr-status");
 const qrResultEl = document.querySelector<HTMLDivElement>("#qr-result");
+const cameraStartButton = document.querySelector<HTMLButtonElement>("#camera-start");
+const cameraStopButton = document.querySelector<HTMLButtonElement>("#camera-stop");
+const cameraVideo = document.querySelector<HTMLVideoElement>("#camera-preview");
+const cameraStatusEl = document.querySelector<HTMLDivElement>("#camera-status");
+const cameraResultEl = document.querySelector<HTMLDivElement>("#camera-result");
 const packetsSummaryEl = document.querySelector<HTMLDivElement>("#packets-summary");
 const debugSummaryEl = document.querySelector<HTMLDivElement>("#debug-summary");
 const checksEl = document.querySelector<HTMLDivElement>("#checks");
 const detailsEl = document.querySelector<HTMLDivElement>("#details");
 
-if (!packetsInput || !debugInput || !qrInput || !statusEl || !qrStatusEl || !qrResultEl || !packetsSummaryEl || !debugSummaryEl || !checksEl || !detailsEl) {
+if (
+  !packetsInput ||
+  !debugInput ||
+  !qrInput ||
+  !statusEl ||
+  !qrStatusEl ||
+  !qrResultEl ||
+  !cameraStartButton ||
+  !cameraStopButton ||
+  !cameraVideo ||
+  !cameraStatusEl ||
+  !cameraResultEl ||
+  !packetsSummaryEl ||
+  !debugSummaryEl ||
+  !checksEl ||
+  !detailsEl
+) {
   throw new Error("missing required DOM elements");
 }
 
@@ -52,42 +73,79 @@ let wasmError: string | null = null;
 let qrWorkerStatus: "loading" | "ready" | "failed" = "loading";
 let qrWorkerError: string | null = null;
 let qrResult: { text: string | null; format: string | null; durationMs: number | null } | null = null;
+let cameraResult: { text: string | null; format: string | null; durationMs: number | null } | null = null;
+let decodeId = 0;
 let qrDecodeId = 0;
+let cameraDecodeId = 0;
+let cameraStream: MediaStream | null = null;
+let cameraTimer: number | null = null;
+let cameraDecodeInFlight = false;
+let cameraCaptureWidth = 0;
+let cameraCaptureHeight = 0;
+let cameraCanvas: HTMLCanvasElement | null = null;
+let cameraContext: CanvasRenderingContext2D | null = null;
+const CAMERA_CAPTURE_MAX_WIDTH = 960;
+const CAMERA_CAPTURE_INTERVAL_MS = 140;
+const supportsBitmapPipeline = typeof createImageBitmap === "function" && "OffscreenCanvas" in window;
 
 const qrWorker = new Worker(new URL("./qr.worker.ts", import.meta.url), { type: "module" });
 qrWorker.postMessage({ type: "init" });
 qrWorker.onmessage = (event) => {
   const msg = event.data as
     | { type: "ready" }
-    | { type: "decoded"; id: number; text: string | null; format: string | null; durationMs: number }
-    | { type: "error"; id?: number; message: string };
+    | { type: "decoded"; id: number; source: "file" | "camera"; text: string | null; format: string | null; durationMs: number }
+    | { type: "error"; id?: number; source?: "file" | "camera"; message: string };
   if (msg.type === "ready") {
     qrWorkerStatus = "ready";
     renderAll();
     return;
   }
   if (msg.type === "error") {
-    qrWorkerStatus = "failed";
-    qrWorkerError = msg.message;
-    if (msg.id !== undefined) {
+    if (msg.id === undefined) {
+      qrWorkerStatus = "failed";
+      qrWorkerError = msg.message;
+      renderAll();
+      return;
+    }
+    if (msg.source === "camera") {
+      cameraDecodeInFlight = false;
+      setCameraStatus("decode failed", true);
+    } else {
       setQrStatus("decode failed", true);
     }
     renderAll();
     return;
   }
   if (msg.type === "decoded") {
-    if (msg.id !== qrDecodeId) {
-      return;
-    }
-    qrResult = {
-      text: msg.text,
-      format: msg.format,
-      durationMs: msg.durationMs,
-    };
-    if (msg.text) {
-      setQrStatus("decoded", false);
+    if (msg.source === "camera") {
+      if (msg.id !== cameraDecodeId) {
+        return;
+      }
+      cameraDecodeInFlight = false;
+      cameraResult = {
+        text: msg.text,
+        format: msg.format,
+        durationMs: msg.durationMs,
+      };
+      if (msg.text) {
+        setCameraStatus("decoded", false);
+      } else {
+        setCameraStatus("scanning...", false);
+      }
     } else {
-      setQrStatus("no QR code found", true);
+      if (msg.id !== qrDecodeId) {
+        return;
+      }
+      qrResult = {
+        text: msg.text,
+        format: msg.format,
+        durationMs: msg.durationMs,
+      };
+      if (msg.text) {
+        setQrStatus("decoded", false);
+      } else {
+        setQrStatus("no QR code found", true);
+      }
     }
     renderAll();
   }
@@ -101,6 +159,11 @@ function setStatus(message: string, isError = false) {
 function setQrStatus(message: string, isError = false) {
   qrStatusEl.textContent = message;
   qrStatusEl.style.color = isError ? "#ff6b6b" : "var(--accent-2)";
+}
+
+function setCameraStatus(message: string, isError = false) {
+  cameraStatusEl.textContent = message;
+  cameraStatusEl.style.color = isError ? "#ff6b6b" : "var(--accent-2)";
 }
 
 function bytesToHex(bytes: Uint8Array) {
@@ -259,6 +322,157 @@ function equalBytes(a: Uint8Array, b: Uint8Array) {
   return true;
 }
 
+function nextDecodeId() {
+  decodeId += 1;
+  return decodeId;
+}
+
+function updateCameraControls() {
+  const running = cameraStream !== null;
+  cameraStartButton.disabled = running;
+  cameraStopButton.disabled = !running;
+}
+
+function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
+  if (video.readyState >= 1 && video.videoWidth > 0 && video.videoHeight > 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const onReady = () => resolve();
+    video.addEventListener("loadedmetadata", onReady, { once: true });
+  });
+}
+
+function computeCaptureSize(width: number, height: number, maxWidth: number) {
+  if (width <= 0 || height <= 0) {
+    return { width: 0, height: 0 };
+  }
+  const scale = Math.min(1, maxWidth / width);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+function ensureCameraCanvas(width: number, height: number): CanvasRenderingContext2D | null {
+  if (!cameraCanvas) {
+    cameraCanvas = document.createElement("canvas");
+    cameraContext = cameraCanvas.getContext("2d", { willReadFrequently: true });
+  }
+  if (!cameraContext || !cameraCanvas) {
+    return null;
+  }
+  if (cameraCanvas.width !== width || cameraCanvas.height !== height) {
+    cameraCanvas.width = width;
+    cameraCanvas.height = height;
+  }
+  return cameraContext;
+}
+
+async function startCamera() {
+  if (cameraStream) {
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setCameraStatus("Camera API unavailable", true);
+    return;
+  }
+  setCameraStatus("Requesting camera...", false);
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: "environment" } },
+      audio: false,
+    });
+    cameraStream = stream;
+    cameraVideo.srcObject = stream;
+    await cameraVideo.play();
+    await waitForVideoMetadata(cameraVideo);
+    const capture = computeCaptureSize(cameraVideo.videoWidth, cameraVideo.videoHeight, CAMERA_CAPTURE_MAX_WIDTH);
+    cameraCaptureWidth = capture.width;
+    cameraCaptureHeight = capture.height;
+    if (cameraTimer !== null) {
+      window.clearInterval(cameraTimer);
+    }
+    cameraTimer = window.setInterval(() => {
+      void captureCameraFrame();
+    }, CAMERA_CAPTURE_INTERVAL_MS);
+    setCameraStatus("Camera running", false);
+  } catch (err) {
+    cameraStream = null;
+    cameraVideo.srcObject = null;
+    setCameraStatus(err instanceof Error ? err.message : "Camera access failed", true);
+  } finally {
+    updateCameraControls();
+  }
+}
+
+function stopCamera() {
+  if (cameraTimer !== null) {
+    window.clearInterval(cameraTimer);
+    cameraTimer = null;
+  }
+  if (cameraStream) {
+    for (const track of cameraStream.getTracks()) {
+      track.stop();
+    }
+    cameraStream = null;
+  }
+  cameraVideo.srcObject = null;
+  cameraDecodeInFlight = false;
+  setCameraStatus("Camera stopped", false);
+  updateCameraControls();
+}
+
+async function captureCameraFrame() {
+  if (!cameraStream || cameraDecodeInFlight || qrWorkerStatus !== "ready") {
+    return;
+  }
+  if (cameraVideo.readyState < 2) {
+    return;
+  }
+  cameraDecodeInFlight = true;
+  if (cameraCaptureWidth === 0 || cameraCaptureHeight === 0) {
+    const capture = computeCaptureSize(cameraVideo.videoWidth, cameraVideo.videoHeight, CAMERA_CAPTURE_MAX_WIDTH);
+    cameraCaptureWidth = capture.width;
+    cameraCaptureHeight = capture.height;
+  }
+
+  try {
+    if (supportsBitmapPipeline) {
+      const bitmap = await createImageBitmap(cameraVideo);
+      const id = nextDecodeId();
+      cameraDecodeId = id;
+      qrWorker.postMessage(
+        {
+          type: "decode-bitmap",
+          id,
+          source: "camera",
+          bitmap,
+          targetWidth: cameraCaptureWidth,
+          targetHeight: cameraCaptureHeight,
+        },
+        [bitmap],
+      );
+      return;
+    }
+
+    const context = ensureCameraCanvas(cameraCaptureWidth, cameraCaptureHeight);
+    if (!context) {
+      cameraDecodeInFlight = false;
+      setCameraStatus("Camera canvas unavailable", true);
+      return;
+    }
+    context.drawImage(cameraVideo, 0, 0, cameraCaptureWidth, cameraCaptureHeight);
+    const imageData = context.getImageData(0, 0, cameraCaptureWidth, cameraCaptureHeight);
+    const id = nextDecodeId();
+    cameraDecodeId = id;
+    qrWorker.postMessage({ type: "decode", id, source: "camera", imageData });
+  } catch (err) {
+    cameraDecodeInFlight = false;
+    setCameraStatus(err instanceof Error ? err.message : "Camera capture failed", true);
+  }
+}
+
 function renderAll() {
   const packetEntries: Array<[string, string]> = [];
   const debugEntries: Array<[string, string]> = [];
@@ -294,6 +508,11 @@ function renderAll() {
   if (qrWorkerError) {
     detailEntries.push(["ZXing error", qrWorkerError]);
   }
+  if (cameraStream) {
+    detailEntries.push(["Camera capture", `${cameraCaptureWidth}x${cameraCaptureHeight}`]);
+  } else {
+    detailEntries.push(["Camera capture", "stopped"]);
+  }
 
   if (qrResult) {
     const qrEntries: Array<[string, string]> = [];
@@ -305,6 +524,18 @@ function renderAll() {
     renderKeyValue(qrResultEl, qrEntries);
   } else {
     renderKeyValue(qrResultEl, []);
+  }
+
+  if (cameraResult) {
+    const cameraEntries: Array<[string, string]> = [];
+    cameraEntries.push(["Text", cameraResult.text ?? "(none)"]);
+    cameraEntries.push(["Format", cameraResult.format ?? "(none)"]);
+    if (cameraResult.durationMs !== null) {
+      cameraEntries.push(["Decode ms", cameraResult.durationMs.toFixed(1)]);
+    }
+    renderKeyValue(cameraResultEl, cameraEntries);
+  } else {
+    renderKeyValue(cameraResultEl, []);
   }
 
   if (debugInfo) {
@@ -373,6 +604,15 @@ qrInput.addEventListener("change", () => {
   void decodeQrFile(file);
 });
 
+cameraStartButton.addEventListener("click", () => {
+  void startCamera();
+});
+
+cameraStopButton.addEventListener("click", () => {
+  stopCamera();
+});
+
+updateCameraControls();
 renderAll();
 
 void initWasmDecoder()
@@ -409,6 +649,7 @@ async function decodeQrFile(file: File) {
   }
   context.drawImage(bitmap, 0, 0);
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  qrDecodeId += 1;
-  qrWorker.postMessage({ type: "decode", id: qrDecodeId, imageData });
+  const id = nextDecodeId();
+  qrDecodeId = id;
+  qrWorker.postMessage({ type: "decode", id, source: "file", imageData });
 }

@@ -43,6 +43,21 @@
         <div id="qr-result" class="kv"></div>
       </section>
 
+      <section class="panel">
+        <h2>Live Camera (ZXing)</h2>
+        <div class="camera-controls">
+          <button id="camera-start" class="button">Start camera</button>
+          <button id="camera-stop" class="button" disabled>Stop</button>
+        </div>
+        <div class="camera-grid">
+          <video id="camera-preview" class="camera-preview" autoplay muted playsinline></video>
+          <div>
+            <div id="camera-status" class="status">Camera idle</div>
+            <div id="camera-result" class="kv"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="grid">
         <div class="panel">
           <h2>Packets Summary</h2>
