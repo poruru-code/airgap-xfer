@@ -3,5 +3,7 @@ target/
 **/.vite/
 **/dist/
 **/.artifacts/
+**/test-results/
+**/playwright-report/
 *.log
 *.tmp
