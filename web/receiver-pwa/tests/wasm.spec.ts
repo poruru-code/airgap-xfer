@@ -13,6 +13,7 @@ function readArtifacts() {
     debug: string;
     qr: string;
     qrPayload: string;
+    cimbar: string;
   };
   return parsed;
 }
@@ -22,13 +23,14 @@ function valueForLabel(label: string) {
 }
 
 test("wasm-backed CRC32C parses packets.bin and ZXing decodes QR", async ({ page }) => {
-  const { packets, debug, qr, qrPayload } = readArtifacts();
+  const { packets, debug, qr, qrPayload, cimbar } = readArtifacts();
 
   await page.goto("/");
 
   await page.setInputFiles("#packets-file", packets);
   await page.setInputFiles("#debug-file", debug);
   await page.setInputFiles("#qr-file", qr);
+  await page.setInputFiles("#cimbar-file", cimbar);
 
   await expect(page.locator("#status")).toHaveText(/loaded/i);
   await expect(page.locator(valueForLabel("Wasm decoder"))).toHaveText(/ready/i);
@@ -38,5 +40,7 @@ test("wasm-backed CRC32C parses packets.bin and ZXing decodes QR", async ({ page
   await expect(page.locator(valueForLabel("Cimbar bufsize"))).toHaveText(/\d+/);
   await expect(page.locator("#qr-status")).toHaveText(/decoded/i);
   await expect(page.locator("#qr-result")).toContainText(qrPayload);
+  await expect(page.locator("#cimbar-status")).toHaveText(/decoded/i);
+  await expect(page.locator("#cimbar-result")).toContainText(/Bytes/i);
   await expect(page.locator("#checks")).toContainText("Session ID vs debug.json");
 });

@@ -7,18 +7,23 @@ import {
   parseDataPacket,
   wasmDecoderReady,
 } from "./packets";
-import { cimbarDecoderInfo, initCimbarDecoder } from "./cimbar";
+import { cimbarDecoderInfo, decodeCimbarRgba, initCimbarDecoder } from "./cimbar";
 
 const packetsInput = document.querySelector<HTMLInputElement>("#packets-file");
 const debugInput = document.querySelector<HTMLInputElement>("#debug-file");
 const qrInput = document.querySelector<HTMLInputElement>("#qr-file");
+const cimbarInput = document.querySelector<HTMLInputElement>("#cimbar-file");
 const statusEl = document.querySelector<HTMLDivElement>("#status");
 const qrStatusEl = document.querySelector<HTMLDivElement>("#qr-status");
 const qrResultEl = document.querySelector<HTMLDivElement>("#qr-result");
+const cimbarStatusEl = document.querySelector<HTMLDivElement>("#cimbar-status");
+const cimbarResultEl = document.querySelector<HTMLDivElement>("#cimbar-result");
 const cameraStartButton = document.querySelector<HTMLButtonElement>("#camera-start");
 const cameraStopButton = document.querySelector<HTMLButtonElement>("#camera-stop");
+const cameraDecoderSelect = document.querySelector<HTMLSelectElement>("#camera-decoder");
 const cameraMaxWidthSelect = document.querySelector<HTMLSelectElement>("#camera-max-width");
 const cameraIntervalSelect = document.querySelector<HTMLSelectElement>("#camera-interval");
+const cimbarModeSelect = document.querySelector<HTMLSelectElement>("#cimbar-mode");
 const cameraVideo = document.querySelector<HTMLVideoElement>("#camera-preview");
 const cameraStatusEl = document.querySelector<HTMLDivElement>("#camera-status");
 const cameraResultEl = document.querySelector<HTMLDivElement>("#camera-result");
@@ -31,13 +36,18 @@ if (
   !packetsInput ||
   !debugInput ||
   !qrInput ||
+  !cimbarInput ||
   !statusEl ||
   !qrStatusEl ||
   !qrResultEl ||
+  !cimbarStatusEl ||
+  !cimbarResultEl ||
   !cameraStartButton ||
   !cameraStopButton ||
+  !cameraDecoderSelect ||
   !cameraMaxWidthSelect ||
   !cameraIntervalSelect ||
+  !cimbarModeSelect ||
   !cameraVideo ||
   !cameraStatusEl ||
   !cameraResultEl ||
@@ -80,8 +90,15 @@ let qrWorkerError: string | null = null;
 let cimbarStatus: "loading" | "ready" | "failed" = "loading";
 let cimbarError: string | null = null;
 let cimbarBufsizeValue: number | null = null;
-let qrResult: { text: string | null; format: string | null; durationMs: number | null } | null = null;
-let cameraResult: { text: string | null; format: string | null; durationMs: number | null } | null = null;
+type QrResult = { text: string | null; format: string | null; durationMs: number | null };
+type CimbarResult = { bytesLen: number; mode: number | null; durationMs: number | null };
+type CameraResult =
+  | ({ kind: "qr" } & QrResult)
+  | ({ kind: "cimbar" } & CimbarResult);
+
+let qrResult: QrResult | null = null;
+let cimbarFileResult: CimbarResult | null = null;
+let cameraResult: CameraResult | null = null;
 let decodeId = 0;
 let qrDecodeId = 0;
 let cameraDecodeId = 0;
@@ -99,6 +116,8 @@ let cameraCaptureMaxWidth = CAMERA_CAPTURE_MAX_WIDTH_DEFAULT;
 let cameraCaptureIntervalMs = CAMERA_CAPTURE_INTERVAL_MS_DEFAULT;
 let lastCameraText: string | null = null;
 let lastCameraTextAt = 0;
+let cameraDecoderMode: "qr" | "cimbar" = "qr";
+let cameraCimbarMode: number | null = null;
 const supportsBitmapPipeline = typeof createImageBitmap === "function" && "OffscreenCanvas" in window;
 
 const qrWorker = new Worker(new URL("./qr.worker.ts", import.meta.url), { type: "module" });
@@ -145,6 +164,7 @@ qrWorker.onmessage = (event) => {
         lastCameraText = msg.text;
         lastCameraTextAt = now;
         cameraResult = {
+          kind: "qr",
           text: msg.text,
           format: msg.format,
           durationMs: msg.durationMs,
@@ -180,6 +200,11 @@ function setStatus(message: string, isError = false) {
 function setQrStatus(message: string, isError = false) {
   qrStatusEl.textContent = message;
   qrStatusEl.style.color = isError ? "#ff6b6b" : "var(--accent-2)";
+}
+
+function setCimbarStatus(message: string, isError = false) {
+  cimbarStatusEl.textContent = message;
+  cimbarStatusEl.style.color = isError ? "#ff6b6b" : "var(--accent-2)";
 }
 
 function setCameraStatus(message: string, isError = false) {
@@ -223,6 +248,23 @@ function payloadTypeLabel(type: number) {
       return "HEARTBEAT";
     default:
       return `UNKNOWN(${type})`;
+  }
+}
+
+function cimbarModeLabel(mode: number | null) {
+  switch (mode) {
+    case 4:
+      return "4C";
+    case 8:
+      return "8C";
+    case 67:
+      return "Bm";
+    case 68:
+      return "B";
+    case 0:
+      return "Auto";
+    default:
+      return mode === null ? "(auto)" : String(mode);
   }
 }
 
@@ -381,6 +423,29 @@ function setCameraMaxWidth(value: number) {
   }
 }
 
+function parseCimbarMode(value: string): number | null {
+  switch (value) {
+    case "B":
+      return 68;
+    case "Bm":
+      return 67;
+    case "4C":
+      return 4;
+    case "8C":
+      return 8;
+    case "auto":
+    default:
+      return null;
+  }
+}
+
+function cimbarModeCandidates(mode: number | null): number[] {
+  if (mode !== null) {
+    return [mode];
+  }
+  return [4, 67, 68, 8];
+}
+
 function waitForVideoMetadata(video: HTMLVideoElement): Promise<void> {
   if (video.readyState >= 1 && video.videoWidth > 0 && video.videoHeight > 0) {
     return Promise.resolve();
@@ -478,7 +543,13 @@ function stopCamera() {
 }
 
 async function captureCameraFrame() {
-  if (!cameraStream || cameraDecodeInFlight || qrWorkerStatus !== "ready") {
+  if (!cameraStream || cameraDecodeInFlight) {
+    return;
+  }
+  if (cameraDecoderMode === "qr" && qrWorkerStatus !== "ready") {
+    return;
+  }
+  if (cameraDecoderMode === "cimbar" && cimbarStatus !== "ready") {
     return;
   }
   if (cameraVideo.readyState < 2) {
@@ -492,7 +563,7 @@ async function captureCameraFrame() {
   }
 
   try {
-    if (supportsBitmapPipeline) {
+    if (cameraDecoderMode === "qr" && supportsBitmapPipeline) {
       const bitmap = await createImageBitmap(cameraVideo);
       const id = nextDecodeId();
       cameraDecodeId = id;
@@ -520,7 +591,42 @@ async function captureCameraFrame() {
     const imageData = context.getImageData(0, 0, cameraCaptureWidth, cameraCaptureHeight);
     const id = nextDecodeId();
     cameraDecodeId = id;
-    qrWorker.postMessage({ type: "decode", id, source: "camera", imageData });
+    if (cameraDecoderMode === "qr") {
+      qrWorker.postMessage({ type: "decode", id, source: "camera", imageData });
+    } else {
+      const rgba = new Uint8Array(imageData.data);
+      const started = performance.now();
+      decodeCimbarRgba(rgba, cameraCaptureWidth, cameraCaptureHeight, {
+        mode: cameraCimbarMode ?? undefined,
+        transfer: true,
+      })
+        .then((result) => {
+          if (id !== cameraDecodeId) {
+            return;
+          }
+          cameraDecodeInFlight = false;
+          if (result.status === "ok" && result.bytes) {
+            cameraResult = {
+              kind: "cimbar",
+              bytesLen: result.bytes.length,
+              mode: result.mode,
+              durationMs: performance.now() - started,
+            };
+            setCameraStatus("decoded", false);
+          } else {
+            setCameraStatus("scanning...", false);
+          }
+          renderAll();
+        })
+        .catch((err) => {
+          if (id !== cameraDecodeId) {
+            return;
+          }
+          cameraDecodeInFlight = false;
+          setCameraStatus(err instanceof Error ? err.message : "cimbar decode failed", true);
+          renderAll();
+        });
+    }
   } catch (err) {
     cameraDecodeInFlight = false;
     setCameraStatus(err instanceof Error ? err.message : "Camera capture failed", true);
@@ -568,6 +674,8 @@ function renderAll() {
   } else if (cimbarStatus === "ready" && cimbarBufsizeValue !== null) {
     detailEntries.push(["Cimbar bufsize", cimbarBufsizeValue.toString()]);
   }
+  detailEntries.push(["Camera decoder", cameraDecoderMode]);
+  detailEntries.push(["Cimbar mode", cimbarModeLabel(cameraCimbarMode)]);
   detailEntries.push(["Camera config", `${cameraCaptureMaxWidth}px / ${cameraCaptureIntervalMs}ms`]);
   if (cameraStream) {
     detailEntries.push(["Camera capture", `${cameraCaptureWidth}x${cameraCaptureHeight}`]);
@@ -587,10 +695,27 @@ function renderAll() {
     renderKeyValue(qrResultEl, []);
   }
 
+  if (cimbarFileResult) {
+    const cimbarEntries: Array<[string, string]> = [];
+    cimbarEntries.push(["Bytes", cimbarFileResult.bytesLen.toString()]);
+    cimbarEntries.push(["Mode", cimbarModeLabel(cimbarFileResult.mode)]);
+    if (cimbarFileResult.durationMs !== null) {
+      cimbarEntries.push(["Decode ms", cimbarFileResult.durationMs.toFixed(1)]);
+    }
+    renderKeyValue(cimbarResultEl, cimbarEntries);
+  } else {
+    renderKeyValue(cimbarResultEl, []);
+  }
+
   if (cameraResult) {
     const cameraEntries: Array<[string, string]> = [];
-    cameraEntries.push(["Text", cameraResult.text ?? "(none)"]);
-    cameraEntries.push(["Format", cameraResult.format ?? "(none)"]);
+    if (cameraResult.kind === "qr") {
+      cameraEntries.push(["Text", cameraResult.text ?? "(none)"]);
+      cameraEntries.push(["Format", cameraResult.format ?? "(none)"]);
+    } else {
+      cameraEntries.push(["Bytes", cameraResult.bytesLen.toString()]);
+      cameraEntries.push(["Mode", cimbarModeLabel(cameraResult.mode)]);
+    }
     if (cameraResult.durationMs !== null) {
       cameraEntries.push(["Decode ms", cameraResult.durationMs.toFixed(1)]);
     }
@@ -665,6 +790,14 @@ qrInput.addEventListener("change", () => {
   void decodeQrFile(file);
 });
 
+cimbarInput.addEventListener("change", () => {
+  const file = cimbarInput.files?.[0];
+  if (!file) {
+    return;
+  }
+  void decodeCimbarFile(file);
+});
+
 cameraStartButton.addEventListener("click", () => {
   void startCamera();
 });
@@ -675,6 +808,9 @@ cameraStopButton.addEventListener("click", () => {
 
 cameraMaxWidthSelect.value = String(cameraCaptureMaxWidth);
 cameraIntervalSelect.value = String(cameraCaptureIntervalMs);
+cameraDecoderSelect.value = cameraDecoderMode;
+cimbarModeSelect.value = "auto";
+cameraCimbarMode = parseCimbarMode(cimbarModeSelect.value);
 
 cameraMaxWidthSelect.addEventListener("change", () => {
   const value = Number(cameraMaxWidthSelect.value);
@@ -685,6 +821,22 @@ cameraMaxWidthSelect.addEventListener("change", () => {
 cameraIntervalSelect.addEventListener("change", () => {
   const value = Number(cameraIntervalSelect.value);
   setCameraInterval(value);
+  renderAll();
+});
+
+cameraDecoderSelect.addEventListener("change", () => {
+  cameraDecoderMode = cameraDecoderSelect.value === "cimbar" ? "cimbar" : "qr";
+  cameraResult = null;
+  if (cameraDecoderMode === "cimbar") {
+    setCameraStatus("Cimbar mode selected", false);
+  } else {
+    setCameraStatus("QR mode selected", false);
+  }
+  renderAll();
+});
+
+cimbarModeSelect.addEventListener("change", () => {
+  cameraCimbarMode = parseCimbarMode(cimbarModeSelect.value);
   renderAll();
 });
 
@@ -741,4 +893,55 @@ async function decodeQrFile(file: File) {
   const id = nextDecodeId();
   qrDecodeId = id;
   qrWorker.postMessage({ type: "decode", id, source: "file", imageData });
+}
+
+async function decodeCimbarFile(file: File) {
+  if (cimbarStatus === "failed") {
+    setCimbarStatus("Cimbar wasm failed", true);
+    return;
+  }
+  if (cimbarStatus === "loading") {
+    setCimbarStatus("Cimbar wasm loading...", false);
+  }
+  setCimbarStatus("decoding...", false);
+  cimbarFileResult = null;
+  renderAll();
+
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    setCimbarStatus("canvas unavailable", true);
+    return;
+  }
+  context.drawImage(bitmap, 0, 0);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const modes = cimbarModeCandidates(cameraCimbarMode);
+  const rgba = new Uint8Array(imageData.data);
+
+  const started = performance.now();
+  for (const mode of modes) {
+    try {
+      const result = await decodeCimbarRgba(rgba, canvas.width, canvas.height, { mode, transfer: false });
+      if (result.status === "ok" && result.bytes) {
+        cimbarFileResult = {
+          bytesLen: result.bytes.length,
+          mode: result.mode,
+          durationMs: performance.now() - started,
+        };
+        setCimbarStatus("decoded", false);
+        renderAll();
+        return;
+      }
+    } catch (err) {
+      setCimbarStatus(err instanceof Error ? err.message : "cimbar decode failed", true);
+      renderAll();
+      return;
+    }
+  }
+
+  setCimbarStatus("no Cimbar data found", true);
+  renderAll();
 }

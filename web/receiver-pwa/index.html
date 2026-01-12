@@ -44,10 +44,29 @@
       </section>
 
       <section class="panel">
-        <h2>Live Camera (ZXing)</h2>
+        <h2>Cimbar Decode (libcimbar)</h2>
+        <div class="inputs">
+          <label class="file-field">
+            <span>Cimbar image</span>
+            <input id="cimbar-file" type="file" accept="image/*" />
+          </label>
+        </div>
+        <div id="cimbar-status" class="status">Waiting for Cimbar image</div>
+        <div id="cimbar-result" class="kv"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Live Camera</h2>
         <div class="camera-controls">
           <button id="camera-start" class="button">Start camera</button>
           <button id="camera-stop" class="button" disabled>Stop</button>
+          <label class="select-field">
+            <span>Decoder</span>
+            <select id="camera-decoder">
+              <option value="qr" selected>QR (ZXing)</option>
+              <option value="cimbar">Cimbar</option>
+            </select>
+          </label>
           <label class="select-field">
             <span>Capture width</span>
             <select id="camera-max-width">
@@ -63,6 +82,16 @@
               <option value="140" selected>140 ms</option>
               <option value="200">200 ms</option>
               <option value="250">250 ms</option>
+            </select>
+          </label>
+          <label class="select-field">
+            <span>Cimbar mode</span>
+            <select id="cimbar-mode">
+              <option value="auto" selected>Auto</option>
+              <option value="B">B</option>
+              <option value="Bm">Bm</option>
+              <option value="4C">4C</option>
+              <option value="8C">8C</option>
             </select>
           </label>
         </div>
