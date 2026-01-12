@@ -34,6 +34,8 @@ test("wasm-backed CRC32C parses packets.bin and ZXing decodes QR", async ({ page
   await expect(page.locator(valueForLabel("Wasm decoder"))).toHaveText(/ready/i);
   await expect(page.locator(valueForLabel("CRC32C backend"))).toHaveText(/wasm/i);
   await expect(page.locator(valueForLabel("ZXing worker"))).toHaveText(/ready/i);
+  await expect(page.locator(valueForLabel("Cimbar wasm"))).toHaveText(/ready/i);
+  await expect(page.locator(valueForLabel("Cimbar version"))).toHaveText(/stub/i);
   await expect(page.locator("#qr-status")).toHaveText(/decoded/i);
   await expect(page.locator("#qr-result")).toContainText(qrPayload);
   await expect(page.locator("#checks")).toContainText("Session ID vs debug.json");

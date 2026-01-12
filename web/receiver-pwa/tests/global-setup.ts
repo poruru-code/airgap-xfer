@@ -16,6 +16,7 @@ export default async function globalSetup() {
   mkdirSync(artifactsDir, { recursive: true });
 
   run("scripts/build_wasm_decode.sh", repoRoot);
+  run("scripts/build_wasm_cimbar.sh", repoRoot);
   run("mise exec -- cargo build -p xfer-cli", repoRoot);
 
   const outDir = path.join(tmpdir(), `xfer-pwa-${Date.now()}`);
