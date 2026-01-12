@@ -7,7 +7,7 @@ import {
   parseDataPacket,
   wasmDecoderReady,
 } from "./packets";
-import { cimbarVersion, initCimbarDecoder } from "./cimbar";
+import { cimbarDecoderInfo, initCimbarDecoder } from "./cimbar";
 
 const packetsInput = document.querySelector<HTMLInputElement>("#packets-file");
 const debugInput = document.querySelector<HTMLInputElement>("#debug-file");
@@ -79,7 +79,7 @@ let qrWorkerStatus: "loading" | "ready" | "failed" = "loading";
 let qrWorkerError: string | null = null;
 let cimbarStatus: "loading" | "ready" | "failed" = "loading";
 let cimbarError: string | null = null;
-let cimbarVersionValue: string | null = null;
+let cimbarBufsizeValue: number | null = null;
 let qrResult: { text: string | null; format: string | null; durationMs: number | null } | null = null;
 let cameraResult: { text: string | null; format: string | null; durationMs: number | null } | null = null;
 let decodeId = 0;
@@ -565,8 +565,8 @@ function renderAll() {
   detailEntries.push(["Cimbar wasm", cimbarStatus]);
   if (cimbarError) {
     detailEntries.push(["Cimbar error", cimbarError]);
-  } else if (cimbarStatus === "ready" && cimbarVersionValue) {
-    detailEntries.push(["Cimbar version", cimbarVersionValue]);
+  } else if (cimbarStatus === "ready" && cimbarBufsizeValue !== null) {
+    detailEntries.push(["Cimbar bufsize", cimbarBufsizeValue.toString()]);
   }
   detailEntries.push(["Camera config", `${cameraCaptureMaxWidth}px / ${cameraCaptureIntervalMs}ms`]);
   if (cameraStream) {
@@ -705,7 +705,8 @@ void initWasmDecoder()
 void initCimbarDecoder()
   .then(() => {
     cimbarStatus = "ready";
-    cimbarVersionValue = cimbarVersion();
+    const info = cimbarDecoderInfo();
+    cimbarBufsizeValue = info.bufsize ?? null;
     renderAll();
   })
   .catch((err) => {

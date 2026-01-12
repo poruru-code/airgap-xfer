@@ -1,34 +1,60 @@
-type CimbarWasmModule = {
-  default: (input?: RequestInfo | URL | Response | BufferSource | WebAssembly.Module) => Promise<void>;
-  cimbar_version: () => string;
-  cimbar_decode_rgba: (data: Uint8Array, width: number, height: number) => unknown;
+export type CimbarInitInfo = {
+  bufsize: number | null;
 };
 
-let wasmDecode: ((data: Uint8Array, width: number, height: number) => unknown) | null = null;
-let wasmVersion: (() => string) | null = null;
+type CimbarWorkerReady = { type: "ready"; bufsize: number | null };
+type CimbarWorkerError = { type: "error"; message: string };
 
-export async function initCimbarDecoder(): Promise<void> {
-  const base = import.meta.env.BASE_URL ?? "/";
-  const module = (await import(
-    /* @vite-ignore */ `${base}wasm/cimbar/xfer_cimbar_wasm.js`
-  )) as CimbarWasmModule;
-  await module.default();
-  wasmDecode = module.cimbar_decode_rgba;
-  wasmVersion = module.cimbar_version;
+type CimbarWorkerMessage = CimbarWorkerReady | CimbarWorkerError;
+
+let cimbarWorker: Worker | null = null;
+let cimbarReady = false;
+let cimbarError: string | null = null;
+let cimbarBufsize: number | null = null;
+let initPromise: Promise<CimbarInitInfo> | null = null;
+
+export async function initCimbarDecoder(): Promise<CimbarInitInfo> {
+  if (initPromise) {
+    return initPromise;
+  }
+  initPromise = new Promise((resolve, reject) => {
+    cimbarWorker = new Worker(new URL("./cimbar.worker.ts", import.meta.url), { type: "classic" });
+    const base = import.meta.env.BASE_URL ?? "/";
+    const wasmBase = new URL(`${base}wasm/cimbar/`, window.location.href).toString();
+
+    cimbarWorker.onmessage = (event) => {
+      const msg = event.data as CimbarWorkerMessage;
+      if (msg.type === "ready") {
+        cimbarReady = true;
+        cimbarBufsize = msg.bufsize ?? null;
+        resolve({ bufsize: cimbarBufsize });
+        return;
+      }
+      cimbarReady = false;
+      cimbarError = msg.message;
+      reject(new Error(msg.message));
+    };
+
+    cimbarWorker.onerror = (event) => {
+      cimbarReady = false;
+      const message = event instanceof ErrorEvent ? event.message : "cimbar worker failed";
+      cimbarError = message;
+      reject(new Error(message));
+    };
+
+    cimbarWorker.postMessage({ type: "init", baseUrl: wasmBase });
+  });
+  return initPromise;
 }
 
 export function cimbarDecoderReady(): boolean {
-  return wasmDecode !== null;
+  return cimbarReady;
 }
 
-export function cimbarVersion(): string | null {
-  return wasmVersion ? wasmVersion() : null;
+export function cimbarDecoderError(): string | null {
+  return cimbarError;
 }
 
-export function cimbarDecodeRgba(data: Uint8Array, width: number, height: number): string | null {
-  if (!wasmDecode) {
-    return null;
-  }
-  const result = wasmDecode(data, width, height);
-  return typeof result === "string" && result.length > 0 ? result : null;
+export function cimbarDecoderInfo(): CimbarInitInfo {
+  return { bufsize: cimbarBufsize };
 }

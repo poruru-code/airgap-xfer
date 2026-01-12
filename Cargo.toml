@@ -6,6 +6,5 @@ members = [
   "crates/xfer-render",
   "crates/xfer-cli",
   "web/wasm/decode",
-  "web/wasm/cimbar",
 ]
 resolver = "2"

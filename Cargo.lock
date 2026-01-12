@@ -531,13 +531,6 @@ name = "xfer-render"
 version = "0.1.0"
 
 [[package]]
-name = "xfer_cimbar_wasm"
-version = "0.1.0"
-dependencies = [
- "wasm-bindgen",
-]
-
-[[package]]
 name = "xfer_decode_wasm"
 version = "0.1.0"
 dependencies = [
