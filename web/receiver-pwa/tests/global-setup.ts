@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import QRCode from "qrcode";
 
 function run(cmd: string, cwd: string) {
   execSync(cmd, { cwd, stdio: "inherit" });
@@ -38,9 +39,19 @@ export default async function globalSetup() {
   ].join(" ");
   run(cmd, repoRoot);
 
+  const qrPayload = "AIRGAP-TEST-QR";
+  const qrPath = path.join(outDir, "qr.png");
+  await QRCode.toFile(qrPath, qrPayload, {
+    errorCorrectionLevel: "M",
+    margin: 1,
+    width: 256,
+  });
+
   const artifactPaths = {
     packets: path.join(outDir, "packets.bin"),
     debug: path.join(outDir, "debug.json"),
+    qr: qrPath,
+    qrPayload,
   };
 
   writeFileSync(

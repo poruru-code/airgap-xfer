@@ -48,6 +48,7 @@
 - xfer-cli (inspect): xfer-packets prints stats from packets.bin
 - scripts: e2e_packets.sh for encrypted/plain packet roundtrip validation
 - web/receiver-pwa: Playwright E2E to validate wasm-backed CRC32C parsing
+- web/receiver-pwa: ZXing-C++ wasm QR decode worker + Playwright E2E using QR fixture
 - scripts: build_wasm_decode.sh to build wasm decode crate into `web/receiver-pwa/public/wasm/decode`
 - web/receiver-pwa: Vite scaffold + packets inspector UI + packets.ts parser for packets.bin header/DataPacketV1 + CRC32C
 - web/receiver-pwa: package manager is bun
@@ -214,6 +215,7 @@ Notes:
 - Status: partial
 - DONE: wasm decode crate scaffold (crc32c + packets header CRC check)
 - DONE: PWA loads wasm decoder at startup (CRC32C backed by wasm when available)
+- DONE: ZXing-C++ wasm worker decodes QR from image file input (E2E verified)
 - Phase 1: QR decode in JS/WASM
 - Phase 2: Cimbar decode via WASM (libcimbar)
 - Minimal image preprocessing (OpenCV WASM optional)

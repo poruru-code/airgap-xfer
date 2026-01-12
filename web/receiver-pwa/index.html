@@ -31,6 +31,18 @@
         <div id="status" class="status">Waiting for packets.bin</div>
       </section>
 
+      <section class="panel">
+        <h2>QR Decode (ZXing)</h2>
+        <div class="inputs">
+          <label class="file-field">
+            <span>QR image</span>
+            <input id="qr-file" type="file" accept="image/*" />
+          </label>
+        </div>
+        <div id="qr-status" class="status">Waiting for QR image</div>
+        <div id="qr-result" class="kv"></div>
+      </section>
+
       <section class="grid">
         <div class="panel">
           <h2>Packets Summary</h2>

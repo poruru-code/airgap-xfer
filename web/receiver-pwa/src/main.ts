@@ -10,13 +10,16 @@ import {
 
 const packetsInput = document.querySelector<HTMLInputElement>("#packets-file");
 const debugInput = document.querySelector<HTMLInputElement>("#debug-file");
+const qrInput = document.querySelector<HTMLInputElement>("#qr-file");
 const statusEl = document.querySelector<HTMLDivElement>("#status");
+const qrStatusEl = document.querySelector<HTMLDivElement>("#qr-status");
+const qrResultEl = document.querySelector<HTMLDivElement>("#qr-result");
 const packetsSummaryEl = document.querySelector<HTMLDivElement>("#packets-summary");
 const debugSummaryEl = document.querySelector<HTMLDivElement>("#debug-summary");
 const checksEl = document.querySelector<HTMLDivElement>("#checks");
 const detailsEl = document.querySelector<HTMLDivElement>("#details");
 
-if (!packetsInput || !debugInput || !statusEl || !packetsSummaryEl || !debugSummaryEl || !checksEl || !detailsEl) {
+if (!packetsInput || !debugInput || !qrInput || !statusEl || !qrStatusEl || !qrResultEl || !packetsSummaryEl || !debugSummaryEl || !checksEl || !detailsEl) {
   throw new Error("missing required DOM elements");
 }
 
@@ -46,10 +49,58 @@ let debugInfo: DebugInfo | null = null;
 let packetsInfo: PacketsInfo | null = null;
 let wasmStatus: "loading" | "ready" | "failed" = "loading";
 let wasmError: string | null = null;
+let qrWorkerStatus: "loading" | "ready" | "failed" = "loading";
+let qrWorkerError: string | null = null;
+let qrResult: { text: string | null; format: string | null; durationMs: number | null } | null = null;
+let qrDecodeId = 0;
+
+const qrWorker = new Worker(new URL("./qr.worker.ts", import.meta.url), { type: "module" });
+qrWorker.postMessage({ type: "init" });
+qrWorker.onmessage = (event) => {
+  const msg = event.data as
+    | { type: "ready" }
+    | { type: "decoded"; id: number; text: string | null; format: string | null; durationMs: number }
+    | { type: "error"; id?: number; message: string };
+  if (msg.type === "ready") {
+    qrWorkerStatus = "ready";
+    renderAll();
+    return;
+  }
+  if (msg.type === "error") {
+    qrWorkerStatus = "failed";
+    qrWorkerError = msg.message;
+    if (msg.id !== undefined) {
+      setQrStatus("decode failed", true);
+    }
+    renderAll();
+    return;
+  }
+  if (msg.type === "decoded") {
+    if (msg.id !== qrDecodeId) {
+      return;
+    }
+    qrResult = {
+      text: msg.text,
+      format: msg.format,
+      durationMs: msg.durationMs,
+    };
+    if (msg.text) {
+      setQrStatus("decoded", false);
+    } else {
+      setQrStatus("no QR code found", true);
+    }
+    renderAll();
+  }
+};
 
 function setStatus(message: string, isError = false) {
   statusEl.textContent = message;
   statusEl.style.color = isError ? "#ff6b6b" : "var(--accent-2)";
+}
+
+function setQrStatus(message: string, isError = false) {
+  qrStatusEl.textContent = message;
+  qrStatusEl.style.color = isError ? "#ff6b6b" : "var(--accent-2)";
 }
 
 function bytesToHex(bytes: Uint8Array) {
@@ -239,6 +290,23 @@ function renderAll() {
     detailEntries.push(["CRC32C backend", wasmDecoderReady() ? "wasm" : "js"]);
   }
 
+  detailEntries.push(["ZXing worker", qrWorkerStatus]);
+  if (qrWorkerError) {
+    detailEntries.push(["ZXing error", qrWorkerError]);
+  }
+
+  if (qrResult) {
+    const qrEntries: Array<[string, string]> = [];
+    qrEntries.push(["Text", qrResult.text ?? "(none)"]);
+    qrEntries.push(["Format", qrResult.format ?? "(none)"]);
+    if (qrResult.durationMs !== null) {
+      qrEntries.push(["Decode ms", qrResult.durationMs.toFixed(1)]);
+    }
+    renderKeyValue(qrResultEl, qrEntries);
+  } else {
+    renderKeyValue(qrResultEl, []);
+  }
+
   if (debugInfo) {
     debugEntries.push(["Session", debugInfo.sessionIdHex || "(missing)"]);
     debugEntries.push(["Crypto enabled", String(debugInfo.cryptoEnabled)]);
@@ -297,6 +365,14 @@ debugInput.addEventListener("change", () => {
   void handleDebugFile(file);
 });
 
+qrInput.addEventListener("change", () => {
+  const file = qrInput.files?.[0];
+  if (!file) {
+    return;
+  }
+  void decodeQrFile(file);
+});
+
 renderAll();
 
 void initWasmDecoder()
@@ -309,3 +385,30 @@ void initWasmDecoder()
     wasmError = err instanceof Error ? err.message : "wasm init failed";
     renderAll();
   });
+
+async function decodeQrFile(file: File) {
+  if (qrWorkerStatus === "failed") {
+    setQrStatus("ZXing worker failed", true);
+    return;
+  }
+  if (qrWorkerStatus === "loading") {
+    setQrStatus("ZXing worker loading...", false);
+  }
+  setQrStatus("decoding...", false);
+  qrResult = null;
+  renderAll();
+
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    setQrStatus("canvas unavailable", true);
+    return;
+  }
+  context.drawImage(bitmap, 0, 0);
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  qrDecodeId += 1;
+  qrWorker.postMessage({ type: "decode", id: qrDecodeId, imageData });
+}
